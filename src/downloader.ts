@@ -49,16 +49,39 @@ export function getVideoInfo(url: string): Promise<VideoInfo> {
 
 /**
  * Maps a quality string to a yt-dlp format selector.
- * Always prefers pre-muxed mp4 to enable clean stdout streaming.
+ *
+ * For streaming=true: Returns ONLY pre-muxed formats (no merging) to avoid MPEG-TS output.
+ * For streaming=false: Can use video+audio merging for better quality.
  */
-export function buildYtdlpFormat(quality: VideoQuality = 'best'): string {
-  const heightMap: Record<string, string> = {
-    '1080p': 'bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[height<=1080][ext=mp4]/best[height<=1080]/best',
-    '720p':  'bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best[height<=720][ext=mp4]/best[height<=720]/best',
-    '480p':  'bestvideo[height<=480][ext=mp4]+bestaudio[ext=m4a]/best[height<=480][ext=mp4]/best[height<=480]/best',
-    '360p':  'bestvideo[height<=360][ext=mp4]+bestaudio[ext=m4a]/best[height<=360][ext=mp4]/best[height<=360]/best',
-  };
-  return heightMap[quality] ?? 'best[ext=mp4]/best';
+export function buildYtdlpFormat(quality: VideoQuality = 'best', streaming: boolean = false): string {
+  if (streaming) {
+    // For streaming to stdout: MUST use height-constrained formats for reliability
+    // All qualities capped at 720p for Google Drive streaming compatibility
+    const streamMap: Record<string, string> = {
+      'highest': 'best[height<=720][ext=mp4]/best[height<=720]', // capped at 720p
+      'best': 'best[height<=720][ext=mp4]/best[height<=720]',    // capped at 720p
+      '1080p': 'best[height<=720][ext=mp4]/best[height<=720]',   // capped at 720p
+      '720p': 'best[height<=720][ext=mp4]/best[height<=720]',
+      'mid': 'best[height<=720][ext=mp4]/best[height<=720]',
+      '480p': 'best[height<=480][ext=mp4]/best[height<=480]',
+      '360p': 'best[height<=360][ext=mp4]/best[height<=360]',
+      'lowest': 'worst[ext=mp4]/worst',
+    };
+    return streamMap[quality] ?? 'best[height<=720][ext=mp4]/best[height<=720]';
+  } else {
+    // For local download: Can merge video+audio for better quality
+    const localMap: Record<string, string> = {
+      'highest': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+      'best': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+      '1080p': 'bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[height<=1080][ext=mp4]/best[height<=1080]',
+      '720p': 'bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best[height<=720][ext=mp4]/best[height<=720]',
+      'mid': 'bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best[height<=720][ext=mp4]/best[height<=720]',
+      '480p': 'bestvideo[height<=480][ext=mp4]+bestaudio[ext=m4a]/best[height<=480][ext=mp4]/best[height<=480]',
+      '360p': 'bestvideo[height<=360][ext=mp4]+bestaudio[ext=m4a]/best[height<=360][ext=mp4]/best[height<=360]',
+      'lowest': 'worstvideo[ext=mp4]+worstaudio[ext=m4a]/worst[ext=mp4]/worst',
+    };
+    return localMap[quality] ?? 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best';
+  }
 }
 
 /**
@@ -75,6 +98,7 @@ export function sanitizeFileName(title: string): string {
 /**
  * Streams video from YouTube directly to Google Drive — no local temp file.
  * Spawns yt-dlp with -o - (stdout) and pipes to the Drive upload stream.
+ * Uses height-constrained formats (720p or lower) which work reliably for streaming.
  */
 export async function streamToGDrive(
   url: string,
@@ -82,15 +106,15 @@ export async function streamToGDrive(
   gdrive: GoogleDriveConfig,
   title: string,
 ): Promise<{ driveUrl: string; driveFileId: string }> {
-  const format = buildYtdlpFormat(quality);
-  const fileName = `${sanitizeFileName(title)}.mp4`;
+  const format = buildYtdlpFormat(quality, true); // streaming=true: pre-muxed only
+  const qualityPrefix = quality === 'highest' ? 'high_' : quality === 'lowest' ? 'low_' : '';
+  const fileName = `${qualityPrefix}${sanitizeFileName(title)}.mp4`;
 
-  console.log(`[downloader] Streaming "${title}" → Google Drive (format: ${format})`);
+  console.log(`[downloader] Streaming "${title}" → Google Drive (quality: ${quality}, format: ${format})`);
 
   return new Promise((resolve, reject) => {
     const child = spawn('yt-dlp', [
       '-f', format,
-      '--merge-output-format', 'mp4',
       '-o', '-',
       '--no-playlist',
       url,
@@ -131,6 +155,7 @@ export async function streamToGDrive(
 /**
  * Downloads video to a local file in outputDir.
  * Returns the absolute path to the saved file.
+ * Can use video+audio merging for better quality.
  */
 export async function downloadLocally(
   url: string,
@@ -140,7 +165,7 @@ export async function downloadLocally(
 ): Promise<string> {
   fs.mkdirSync(outputDir, { recursive: true });
 
-  const format = buildYtdlpFormat(quality);
+  const format = buildYtdlpFormat(quality, false); // streaming=false, can use merging
   const safeTitle = sanitizeFileName(title);
   const outputPath = path.join(outputDir, `${safeTitle}.mp4`);
 

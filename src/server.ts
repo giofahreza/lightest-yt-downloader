@@ -88,7 +88,7 @@ app.post('/download', async (req: Request, res: Response) => {
   }
 
   // Validate quality if provided
-  const validQualities = ['best', '1080p', '720p', '480p', '360p'];
+  const validQualities = ['highest', 'best', '1080p', '720p', 'mid', '480p', '360p', 'lowest'];
   if (body.quality && !validQualities.includes(body.quality)) {
     res.status(400).json({ error: `"quality" must be one of: ${validQualities.join(', ')}` });
     return;

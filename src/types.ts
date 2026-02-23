@@ -32,7 +32,7 @@ export interface GoogleDriveConfig {
   folderId: string;
 }
 
-export type VideoQuality = 'best' | '1080p' | '720p' | '480p' | '360p';
+export type VideoQuality = 'highest' | 'best' | '1080p' | '720p' | 'mid' | '480p' | '360p' | 'lowest';
 
 export interface DownloadRequest {
   /** YouTube video URL */
