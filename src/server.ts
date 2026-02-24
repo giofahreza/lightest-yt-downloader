@@ -2,7 +2,7 @@
  * yt-downloader — HTTP API Server
  *
  * POST /download
- *   Body: { url, quality?, format?, googleDrive?: { credentials, folderId } }
+ *   Body: { url, quality?, format?, googleDrive?: { credentials, folderId }, webhookUrl? }
  *   Returns: { jobId, status: "queued" }
  *
  * GET /status/:jobId
@@ -13,6 +13,9 @@
  *
  * If no googleDrive payload is given, the output file is saved locally and
  * the response includes the absolute local path.
+ *
+ * If webhookUrl is provided, a POST request with the job result will be sent
+ * to that URL when the download completes (success or failed).
  */
 
 import express, { Request, Response } from 'express';
@@ -28,6 +31,29 @@ app.use(express.json({ limit: '1mb' }));
 // ─── IN-MEMORY JOB STORE ──────────────────────────────────────────────────────
 
 const jobs = new Map<string, JobResult>();
+
+// ─── WEBHOOK CALLBACK ─────────────────────────────────────────────────────────
+
+async function sendWebhookCallback(webhookUrl: string, job: JobResult): Promise<void> {
+  try {
+    console.log(`[webhook] Sending callback to ${webhookUrl}...`);
+    const response = await fetch(webhookUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(job),
+    });
+
+    if (!response.ok) {
+      console.warn(`[webhook] Callback failed with status ${response.status}: ${response.statusText}`);
+    } else {
+      console.log(`[webhook] Callback sent successfully to ${webhookUrl}`);
+    }
+  } catch (err) {
+    console.error(`[webhook] Failed to send callback to ${webhookUrl}: ${(err as Error).message}`);
+  }
+}
 
 // ─── CORE JOB PROCESSOR ───────────────────────────────────────────────────────
 
@@ -69,6 +95,11 @@ async function processJob(jobId: string, req: DownloadRequest): Promise<void> {
     job.status = 'failed';
     job.error = message;
     job.completedAt = new Date().toISOString();
+  } finally {
+    // Send webhook callback if webhookUrl was provided
+    if (req.webhookUrl) {
+      await sendWebhookCallback(req.webhookUrl, job);
+    }
   }
 }
 
@@ -98,6 +129,16 @@ app.post('/download', async (req: Request, res: Response) => {
   if (body.format && body.format !== 'mp4') {
     res.status(400).json({ error: '"format" must be "mp4"' });
     return;
+  }
+
+  // Validate webhookUrl if provided
+  if (body.webhookUrl) {
+    try {
+      new URL(body.webhookUrl);
+    } catch {
+      res.status(400).json({ error: '"webhookUrl" must be a valid URL' });
+      return;
+    }
   }
 
   // Structural validation of googleDrive credentials

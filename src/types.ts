@@ -43,6 +43,8 @@ export interface DownloadRequest {
   format?: 'mp4';
   /** If provided, stream directly to Google Drive; otherwise save locally */
   googleDrive?: GoogleDriveConfig;
+  /** Optional webhook URL to call when job completes (success or failed) */
+  webhookUrl?: string;
 }
 
 export type JobStatus = 'queued' | 'in_progress' | 'success' | 'failed';
